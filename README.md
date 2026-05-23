@@ -4,6 +4,13 @@
 
 A counterparty graph for any Kite address — see the top wallets/contracts an agent has interacted with, in which direction, how often.
 
+## Deployment
+
+- **Production:** https://kitepoints.vercel.app
+- **Host:** Vercel (`kitepoints`)
+- **Status:** production build verified; reads public KiteScan data client-side
+- **Last verified:** 2026-05-23
+
 ## Stack
 
 - Vite 6 + React 19 + TypeScript
