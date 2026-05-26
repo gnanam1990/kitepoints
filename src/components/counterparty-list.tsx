@@ -44,7 +44,11 @@ export function CounterpartyList({
 }
 
 function Direction({ direction }: { direction: GraphNode["direction"] }) {
-  if (direction === "in") return <ArrowDownLeft className="w-3.5 h-3.5 text-kite-accent" title="received from" />;
-  if (direction === "out") return <ArrowUpRight className="w-3.5 h-3.5 text-kite-primary" title="sent to" />;
-  return <ArrowLeftRight className="w-3.5 h-3.5 text-kite-fg/55" title="bidirectional" />;
+  if (direction === "in") {
+    return <ArrowDownLeft aria-label="received from" className="w-3.5 h-3.5 text-kite-accent" />;
+  }
+  if (direction === "out") {
+    return <ArrowUpRight aria-label="sent to" className="w-3.5 h-3.5 text-kite-primary" />;
+  }
+  return <ArrowLeftRight aria-label="bidirectional" className="w-3.5 h-3.5 text-kite-fg/55" />;
 }
