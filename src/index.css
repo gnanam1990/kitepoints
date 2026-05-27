@@ -60,3 +60,58 @@ pre,
 .dark .kite-gradient {
   background: linear-gradient(135deg, #1F1A14 0%, #2A241B 50%, #3D352A 100%);
 }
+
+@keyframes kitepoints-edge-flow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+@keyframes kitepoints-center-breathe {
+  0%,
+  100% {
+    transform: scale(0.96);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+
+@keyframes kitepoints-flow-pulse {
+  0%,
+  100% {
+    transform: scale(0.62);
+    opacity: 0.14;
+  }
+  45% {
+    transform: scale(1.18);
+    opacity: 0.7;
+  }
+}
+
+.kitepoints-edge {
+  stroke-dasharray: 4 8;
+  animation: kitepoints-edge-flow 5s linear infinite;
+}
+
+.kitepoints-node {
+  transition: opacity 180ms ease;
+}
+
+.kitepoints-flow-dot {
+  animation: kitepoints-flow-pulse 2.4s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.kitepoints-center-dot,
+.kitepoints-center-halo {
+  animation: kitepoints-center-breathe 3.2s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}

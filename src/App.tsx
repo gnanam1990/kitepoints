@@ -8,6 +8,84 @@ import { PreviewBadge } from "./components/preview-badge";
 import { buildGraph, type CounterpartyGraph } from "./lib/graph-build";
 
 const SAMPLE = "0xe1844c5D63a9543023008D332Bd3d2e6f1FE1043";
+const GRAPH_CACHE_KEY = "kitepoints:graph:v2";
+const GRAPH_CACHE_TTL_MS = 15 * 60 * 1000;
+const SAMPLE_NORMALIZED = SAMPLE.toLowerCase();
+const SAMPLE_RECENT_GRAPH: CounterpartyGraph = {
+  focal: SAMPLE_NORMALIZED,
+  nodes: [
+    {
+      address: SAMPLE_NORMALIZED,
+      is_self: true,
+      tx_count: 300,
+      value_wei: 0n,
+      direction: "both",
+    },
+    {
+      address: "0xe93685f3bba03016f02bd1828badd6195988d950",
+      is_self: false,
+      tx_count: 300,
+      value_wei: 0n,
+      direction: "in",
+    },
+  ],
+  total_txs: 300,
+  pages_scanned: 6,
+  is_partial: false,
+};
+
+function readCachedGraph(address: string): CounterpartyGraph | null {
+  const normalized = address.toLowerCase();
+  try {
+    const raw = window.localStorage.getItem(`${GRAPH_CACHE_KEY}:${normalized}`);
+    if (raw) {
+      const parsed = JSON.parse(raw) as {
+        saved_at: number;
+        graph: Omit<CounterpartyGraph, "nodes"> & {
+          nodes: Array<Omit<CounterpartyGraph["nodes"][number], "value_wei"> & { value_wei: string }>;
+        };
+      };
+      if (Date.now() - parsed.saved_at < GRAPH_CACHE_TTL_MS) {
+        return {
+          ...parsed.graph,
+          nodes: parsed.graph.nodes.map((node) => ({
+            ...node,
+            value_wei: BigInt(node.value_wei || "0"),
+          })),
+        };
+      }
+    }
+  } catch {
+    try {
+      window.localStorage.removeItem(`${GRAPH_CACHE_KEY}:${normalized}`);
+    } catch {
+      /* localStorage unavailable */
+    }
+  }
+
+  return normalized === SAMPLE_NORMALIZED ? SAMPLE_RECENT_GRAPH : null;
+}
+
+function writeCachedGraph(address: string, graph: CounterpartyGraph) {
+  try {
+    window.localStorage.setItem(
+      `${GRAPH_CACHE_KEY}:${address.toLowerCase()}`,
+      JSON.stringify({
+        saved_at: Date.now(),
+        graph: {
+          ...graph,
+          is_partial: false,
+          nodes: graph.nodes.map((node) => ({
+            ...node,
+            value_wei: node.value_wei.toString(),
+          })),
+        },
+      })
+    );
+  } catch {
+    /* localStorage unavailable */
+  }
+}
 
 export default function App() {
   const [address, setAddress] = useState<string>(() => {
@@ -19,13 +97,44 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    let visibleGraph = readCachedGraph(address);
+
     setLoading(true);
     setError(null);
-    buildGraph(address)
-      .then(setGraph)
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
+    setGraph(visibleGraph);
+    buildGraph(address, {
+      onProgress: (partialGraph) => {
+        if (cancelled) return;
+        if (visibleGraph && partialGraph.is_partial && partialGraph.total_txs < visibleGraph.total_txs) {
+          setLoading(true);
+          return;
+        }
+        visibleGraph = partialGraph;
+        setGraph(partialGraph);
+        setLoading(partialGraph.is_partial);
+      },
+    })
+      .then((finalGraph) => {
+        if (cancelled) return;
+        if (!visibleGraph || finalGraph.total_txs >= visibleGraph.total_txs) {
+          visibleGraph = finalGraph;
+          setGraph(finalGraph);
+          writeCachedGraph(address, finalGraph);
+        }
+      })
+      .catch((e: Error) => {
+        if (cancelled) return;
+        setError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     window.history.replaceState(null, "", `/${address}`);
+
+    return () => {
+      cancelled = true;
+    };
   }, [address]);
 
   return (
@@ -73,17 +182,17 @@ export default function App() {
           </div>
         </div>
 
-        {loading && (
+        {loading && !graph && (
           <div className="rounded-xl border border-kite-border bg-kite-card p-6 text-sm font-mono text-kite-fg/60">
-            Aggregating transactions from KiteScan…
+            Connecting to KiteScan and building the graph…
           </div>
         )}
-        {error && (
+        {error && !graph && (
           <div className="rounded-xl border border-kite-destructive/40 bg-kite-destructive/5 p-6 text-sm font-mono text-kite-destructive">
             {error}
           </div>
         )}
-        {!loading && !error && graph && (
+        {graph && (
           <div className="grid lg:grid-cols-[1.4fr,1fr] gap-6">
             <div className="space-y-3">
               <NetworkGraph focal={graph.focal} nodes={graph.nodes} onSelect={setAddress} />
@@ -91,13 +200,14 @@ export default function App() {
                 <Legend color="#485C11" label="Inbound" />
                 <Legend color="#9B8564" label="Outbound" />
                 <Legend color="#7D6A4F" label="Both" />
+                {loading && <span className="ml-auto text-kite-accent">Refreshing live scan…</span>}
               </div>
             </div>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-semibold text-kite-fg">Top counterparties</h2>
                 <span className="text-xs font-mono text-kite-fg/55">
-                  {graph.nodes.length - 1} unique · {graph.total_txs} txs scanned
+                  {graph.nodes.length - 1} unique · {graph.total_txs} txs · {graph.pages_scanned} page{graph.pages_scanned === 1 ? "" : "s"}
                 </span>
               </div>
               <CounterpartyList nodes={graph.nodes} onSelect={setAddress} />

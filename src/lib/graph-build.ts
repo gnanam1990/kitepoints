@@ -15,18 +15,50 @@ export interface CounterpartyGraph {
   focal: string;
   nodes: GraphNode[];
   total_txs: number;
+  pages_scanned: number;
+  is_partial: boolean;
 }
 
-const MAX_PAGES = 25;
+interface BuildGraphOptions {
+  maxPages?: number;
+  targetCounterparties?: number;
+  timeBudgetMs?: number;
+  onProgress?: (graph: CounterpartyGraph) => void;
+}
 
-export async function buildGraph(address: string): Promise<CounterpartyGraph> {
+const DEFAULT_MAX_PAGES = 6;
+const DEFAULT_TARGET_COUNTERPARTIES = 24;
+const DEFAULT_TIME_BUDGET_MS = 10_000;
+
+export async function buildGraph(
+  address: string,
+  options: BuildGraphOptions = {}
+): Promise<CounterpartyGraph> {
   const focal = address.toLowerCase();
   const counters = new Map<string, GraphNode>();
   let cursor: Record<string, unknown> | null = null;
   let total = 0;
+  let pagesScanned = 0;
+  const startedAt = performance.now();
+  const maxPages = options.maxPages ?? DEFAULT_MAX_PAGES;
+  const targetCounterparties = options.targetCounterparties ?? DEFAULT_TARGET_COUNTERPARTIES;
+  const timeBudgetMs = options.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS;
 
-  for (let page = 0; page < MAX_PAGES; page++) {
+  const toGraph = (isPartial: boolean): CounterpartyGraph => ({
+    focal,
+    nodes: [
+      { address: focal, is_self: true, tx_count: total, value_wei: 0n, direction: "both" },
+      ...[...counters.values()].sort((a, b) => b.tx_count - a.tx_count),
+    ],
+    total_txs: total,
+    pages_scanned: pagesScanned,
+    is_partial: isPartial,
+  });
+
+  for (let page = 0; page < maxPages; page++) {
     const res = await getAddressTransactions(address, cursor);
+    pagesScanned = page + 1;
+
     for (const tx of res.items) {
       if (tx.status === "error") continue;
       total++;
@@ -60,16 +92,21 @@ export async function buildGraph(address: string): Promise<CounterpartyGraph> {
         if (existing.direction !== dir) existing.direction = "both";
       }
     }
-    if (!res.next_page_params) break;
+
+    const hasMorePages = !!res.next_page_params;
+    const shouldKeepScanning =
+      hasMorePages &&
+      counters.size < targetCounterparties &&
+      performance.now() - startedAt < timeBudgetMs &&
+      page < maxPages - 1;
+
+    options.onProgress?.(toGraph(shouldKeepScanning));
+
+    if (!shouldKeepScanning) break;
     cursor = res.next_page_params;
   }
 
-  const nodes: GraphNode[] = [
-    { address: focal, is_self: true, tx_count: total, value_wei: 0n, direction: "both" },
-    ...[...counters.values()].sort((a, b) => b.tx_count - a.tx_count),
-  ];
-
-  return { focal, nodes, total_txs: total };
+  return toGraph(false);
 }
 
 export function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
